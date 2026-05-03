@@ -7137,6 +7137,23 @@ function isSet15(value) {
   return value !== null && value !== void 0;
 }
 
+// node_modules/@devvit/shared-types/client/emit-effect.js
+var webViewInternalMessageType = "devvit-internal";
+var emitEffect = (effect, requestId) => {
+  const message = {
+    ...effect,
+    realtimeEffect: effect.realtime,
+    // to-do: remove deprecated field.
+    id: requestId,
+    scope: WebViewInternalMessageScope.CLIENT,
+    type: webViewInternalMessageType
+  };
+  if (effect.showToast || effect.navigateToUrl) {
+    message.effect = effect;
+  }
+  parent.postMessage(message, "*");
+};
+
 // node_modules/@devvit/client/effects/web-view-mode.js
 var modeListeners = /* @__PURE__ */ new Set();
 function getWebViewMode() {
@@ -7171,6 +7188,23 @@ function webViewMode(mode) {
 
 // node_modules/@devvit/client/clientContext.js
 var context = globalThis.devvit?.context;
+
+// node_modules/@devvit/client/effects/navigate-to.js
+function navigateTo(thingOrUrl) {
+  const inputUrl = typeof thingOrUrl === "string" ? thingOrUrl : thingOrUrl.url;
+  let normalizedUrl;
+  try {
+    normalizedUrl = new URL(inputUrl).toString();
+  } catch {
+    throw new TypeError(`Invalid URL: ${inputUrl}`);
+  }
+  void emitEffect({
+    navigateToUrl: {
+      url: normalizedUrl
+    },
+    type: 5
+  });
+}
 
 // node_modules/@devvit/protos/json/reddit/devvit/app_permission/v1/app_permission.js
 var ConsentStatus2;
@@ -7380,6 +7414,195 @@ var raidStatusContainer = document.getElementById("raid-status-container");
 var overloadedMods = document.getElementById("overloaded-mods");
 var totalActions = document.getElementById("total-actions");
 var modListContainer = document.getElementById("mod-list-container");
+var alertsContainer = document.getElementById("alerts-container");
+var healthData = null;
+var toxicData = null;
+var raidData = null;
+var burnoutData = null;
+function showToast(msg, isError = false) {
+  let toast = document.getElementById("toast");
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.id = "toast";
+    toast.style.cssText = `
+      position:fixed;bottom:80px;left:50%;transform:translateX(-50%);
+      background:#1a1a2e;border:1px solid #ff4500;border-radius:10px;
+      padding:10px 18px;font-size:13px;font-weight:600;z-index:2000;
+      transition:opacity 0.3s;white-space:nowrap;
+    `;
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.style.borderColor = isError ? "#f44336" : "#4caf50";
+  toast.style.color = isError ? "#f44336" : "#4caf50";
+  toast.style.opacity = "1";
+  setTimeout(() => {
+    toast.style.opacity = "0";
+  }, 2500);
+}
+async function removePost(postId, itemType, btn, container) {
+  btn.textContent = "\u23F3";
+  btn.disabled = true;
+  try {
+    const res = await fetch("/api/remove-post", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ postId, itemType })
+    });
+    const data = await res.json();
+    if (data.success) {
+      container.style.opacity = "0.4";
+      container.style.textDecoration = "line-through";
+      btn.textContent = "\u2713";
+      showToast("\u2705 Removed!");
+    } else {
+      btn.textContent = "\u{1F5D1}\uFE0F";
+      btn.disabled = false;
+      showToast("\u274C Remove failed", true);
+    }
+  } catch {
+    btn.textContent = "\u{1F5D1}\uFE0F";
+    btn.disabled = false;
+    showToast("\u274C Error", true);
+  }
+}
+async function lockPost(postId, btn, container) {
+  btn.textContent = "\u23F3";
+  btn.disabled = true;
+  try {
+    const res = await fetch("/api/lock-post", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ postId })
+    });
+    const data = await res.json();
+    if (data.success) {
+      btn.textContent = "\u{1F512}";
+      showToast("\u{1F512} Post locked!");
+    } else {
+      btn.textContent = "\u{1F513}";
+      btn.disabled = false;
+      showToast("\u274C Lock failed", true);
+    }
+  } catch {
+    btn.textContent = "\u{1F513}";
+    btn.disabled = false;
+    showToast("\u274C Error", true);
+  }
+}
+async function approvePost(postId, itemType, btn, container) {
+  btn.textContent = "\u23F3";
+  btn.disabled = true;
+  try {
+    const res = await fetch("/api/approve-post", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ postId, itemType })
+    });
+    const data = await res.json();
+    if (data.success) {
+      container.style.opacity = "0.6";
+      btn.textContent = "\u2713";
+      showToast("\u2705 Approved!");
+    } else {
+      btn.textContent = "\u2705";
+      btn.disabled = false;
+      showToast("\u274C Approve failed", true);
+    }
+  } catch {
+    btn.textContent = "\u2705";
+    btn.disabled = false;
+    showToast("\u274C Error", true);
+  }
+}
+async function banUser(username, btn, container) {
+  if (!confirm(`Ban u/${username} from this subreddit?`)) return;
+  btn.textContent = "\u23F3";
+  btn.disabled = true;
+  try {
+    const res = await fetch("/api/ban-user", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, subredditName: context.subredditName })
+    });
+    const data = await res.json();
+    if (data.success) {
+      container.style.opacity = "0.4";
+      btn.textContent = "\u{1F6AB}";
+      showToast(`\u{1F6AB} u/${username} banned!`);
+    } else {
+      btn.textContent = "\u{1F6AB} Ban";
+      btn.disabled = false;
+      showToast("\u274C Ban failed", true);
+    }
+  } catch {
+    btn.textContent = "\u{1F6AB} Ban";
+    btn.disabled = false;
+    showToast("\u274C Error", true);
+  }
+}
+function createPostCard(post, showActions = true, colorClass = "good") {
+  const div = document.createElement("div");
+  div.className = `alert ${colorClass}`;
+  div.style.marginBottom = "8px";
+  const typeLabel = post.type === "comment" ? `<span style="font-size:10px;background:rgba(100,100,255,0.2);color:#9090ff;padding:2px 6px;border-radius:4px;margin-right:4px;">\u{1F4AC} Comment</span>` : "";
+  const infoDiv = document.createElement("div");
+  infoDiv.style.cursor = "pointer";
+  infoDiv.innerHTML = `
+    ${typeLabel}
+    ${post.riskLevel ? `<span class="risk-badge risk-${post.riskLevel.toLowerCase()}">${post.riskLevel} Risk</span>` : ""}
+    ${post.reason ? `<span class="risk-badge risk-high">${post.reason}</span>` : ""}
+    <strong>${post.title}</strong>
+    <div class="alert-time">\u{1F464} u/${post.author ?? "unknown"} ${post.triggers?.length ? "\xB7 Triggers: " + post.triggers.join(", ") : ""}</div>
+  `;
+  infoDiv.addEventListener("click", () => navigateTo(post.url));
+  div.appendChild(infoDiv);
+  if (showActions && post.id) {
+    const actionsDiv = document.createElement("div");
+    actionsDiv.style.cssText = "display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;";
+    const removeBtn = document.createElement("button");
+    removeBtn.textContent = "\u{1F5D1}\uFE0F Remove";
+    removeBtn.style.cssText = "flex:1;min-width:70px;padding:6px;border-radius:8px;border:1px solid rgba(244,67,54,0.4);background:rgba(244,67,54,0.1);color:#f44336;font-size:11px;font-weight:700;cursor:pointer;";
+    removeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      removePost(post.id, post.type ?? "post", removeBtn, div);
+    });
+    const lockBtn = document.createElement("button");
+    lockBtn.textContent = "\u{1F513} Lock";
+    lockBtn.style.cssText = "flex:1;min-width:70px;padding:6px;border-radius:8px;border:1px solid rgba(255,152,0,0.4);background:rgba(255,152,0,0.1);color:#ff9800;font-size:11px;font-weight:700;cursor:pointer;";
+    lockBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      lockPost(post.id, lockBtn, div);
+    });
+    const approveBtn = document.createElement("button");
+    approveBtn.textContent = "\u2705 Approve";
+    approveBtn.style.cssText = "flex:1;min-width:70px;padding:6px;border-radius:8px;border:1px solid rgba(76,175,80,0.4);background:rgba(76,175,80,0.1);color:#4caf50;font-size:11px;font-weight:700;cursor:pointer;";
+    approveBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      approvePost(post.id, post.type ?? "post", approveBtn, div);
+    });
+    const banBtn = document.createElement("button");
+    banBtn.textContent = "\u{1F6AB} Ban";
+    banBtn.style.cssText = "flex:1;min-width:70px;padding:6px;border-radius:8px;border:1px solid rgba(156,39,176,0.4);background:rgba(156,39,176,0.1);color:#ce93d8;font-size:11px;font-weight:700;cursor:pointer;";
+    banBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      banUser(post.author, banBtn, div);
+    });
+    actionsDiv.appendChild(removeBtn);
+    actionsDiv.appendChild(lockBtn);
+    actionsDiv.appendChild(approveBtn);
+    actionsDiv.appendChild(banBtn);
+    div.appendChild(actionsDiv);
+  }
+  return div;
+}
+function showDetail(boxId, titleId, bodyId, closeId, title, html) {
+  const box = document.getElementById(boxId);
+  document.getElementById(titleId).textContent = title;
+  document.getElementById(bodyId).innerHTML = html;
+  box.classList.add("show");
+  document.getElementById(closeId).onclick = () => box.classList.remove("show");
+}
 function init() {
   subtitle.textContent = `r/${context.subredditName ?? "your community"}`;
 }
@@ -7405,19 +7628,150 @@ document.getElementById("tab-overview")?.addEventListener("click", () => switchT
 document.getElementById("tab-toxicity")?.addEventListener("click", () => switchTab("toxicity"));
 document.getElementById("tab-raid")?.addEventListener("click", () => switchTab("raid"));
 document.getElementById("tab-burnout")?.addEventListener("click", () => switchTab("burnout"));
+document.getElementById("card-posts")?.addEventListener("click", () => {
+  if (!healthData?.recentPosts?.length) return;
+  const box = document.getElementById("detail-box");
+  document.getElementById("detail-title").textContent = "\u{1F4DD} Recent Posts";
+  const body = document.getElementById("detail-body");
+  body.innerHTML = "";
+  healthData.recentPosts.forEach((p) => body.appendChild(createPostCard(p, true, "good")));
+  box.classList.add("show");
+  document.getElementById("detail-close").onclick = () => box.classList.remove("show");
+});
+document.getElementById("card-flagged")?.addEventListener("click", () => {
+  if (!healthData) return;
+  const box = document.getElementById("detail-box");
+  document.getElementById("detail-title").textContent = "\u26A0\uFE0F Flagged Posts";
+  const body = document.getElementById("detail-body");
+  body.innerHTML = "";
+  if (!healthData.flaggedDetails?.length) {
+    body.innerHTML = `<div class="alert good">\u2705 No flagged posts!</div>`;
+  } else {
+    healthData.flaggedDetails.forEach((p) => body.appendChild(createPostCard(p, true, "danger")));
+  }
+  box.classList.add("show");
+  document.getElementById("detail-close").onclick = () => box.classList.remove("show");
+});
+document.getElementById("card-members")?.addEventListener("click", () => {
+  if (!healthData) return;
+  showDetail(
+    "detail-box",
+    "detail-title",
+    "detail-body",
+    "detail-close",
+    "\u{1F465} Community Info",
+    `<div class="alert good">
+      <strong>r/${healthData.subredditName}</strong>
+      <div class="alert-time">\u{1F465} ${healthData.members} total members \xB7 \u{1F4DD} ${healthData.totalPosts} posts</div>
+    </div>`
+  );
+});
+document.getElementById("card-raidrisk")?.addEventListener("click", () => {
+  showDetail(
+    "detail-box",
+    "detail-title",
+    "detail-body",
+    "detail-close",
+    "\u{1F6A8} Raid Info",
+    `<div class="alert">Switch to Raid tab and run Raid Scan for details</div>`
+  );
+});
+document.getElementById("card-highrisk")?.addEventListener("click", () => {
+  if (!toxicData) return;
+  const box = document.getElementById("toxic-detail-box");
+  document.getElementById("toxic-detail-title").textContent = "\u2623\uFE0F High Risk Posts";
+  const body = document.getElementById("toxic-detail-body");
+  body.innerHTML = "";
+  const high = toxicData.riskyPosts?.filter((p) => p.riskLevel === "High") ?? [];
+  if (!high.length) {
+    body.innerHTML = `<div class="alert good">\u2705 No high risk posts!</div>`;
+  } else {
+    high.forEach((p) => body.appendChild(createPostCard(p, true, "danger")));
+  }
+  box.classList.add("show");
+  document.getElementById("toxic-detail-close").onclick = () => box.classList.remove("show");
+});
+document.getElementById("card-analyzed")?.addEventListener("click", () => {
+  if (!toxicData) return;
+  const box = document.getElementById("toxic-detail-box");
+  document.getElementById("toxic-detail-title").textContent = "\u{1F52C} All Risky Posts & Comments";
+  const body = document.getElementById("toxic-detail-body");
+  body.innerHTML = "";
+  if (!toxicData.riskyPosts?.length) {
+    body.innerHTML = `<div class="alert good">\u2705 All posts clean!</div>`;
+  } else {
+    toxicData.riskyPosts.forEach((p) => body.appendChild(createPostCard(p, true, p.riskLevel === "High" ? "danger" : "warning")));
+  }
+  box.classList.add("show");
+  document.getElementById("toxic-detail-close").onclick = () => box.classList.remove("show");
+});
+document.getElementById("card-uniqueauthors")?.addEventListener("click", () => {
+  if (!raidData?.suspiciousUsers?.length) return;
+  const box = document.getElementById("raid-detail-box");
+  document.getElementById("raid-detail-title").textContent = "\u{1F464} Suspicious Users";
+  const body = document.getElementById("raid-detail-body");
+  body.innerHTML = "";
+  raidData.suspiciousUsers.forEach((u) => {
+    const userDiv = document.createElement("div");
+    userDiv.className = `alert ${u.postCount > 3 ? "danger" : u.postCount > 1 ? "warning" : "good"}`;
+    userDiv.style.marginBottom = "6px";
+    userDiv.innerHTML = `<strong>u/${u.author}</strong> \u2014 ${u.postCount} posts \xB7 <span style="color:${u.accountAgeDays < 7 ? "#f44336" : u.accountAgeDays < 30 ? "#ff9800" : "#4caf50"}">${u.accountAgeLabel}</span>`;
+    body.appendChild(userDiv);
+    u.posts?.forEach((p) => body.appendChild(createPostCard(p, true, "")));
+  });
+  box.classList.add("show");
+  document.getElementById("raid-detail-close").onclick = () => box.classList.remove("show");
+});
+document.getElementById("card-overloaded")?.addEventListener("click", () => {
+  if (!burnoutData) return;
+  const high = burnoutData.mods?.filter((m) => m.burnoutLevel === "High") ?? [];
+  showDetail(
+    "burnout-detail-box",
+    "burnout-detail-title",
+    "burnout-detail-body",
+    "burnout-detail-close",
+    "\u{1F62E}\u200D\u{1F4A8} Overloaded Mods",
+    high.length === 0 ? `<div class="alert good">\u2705 No overloaded mods!</div>` : high.map((m) => `
+          <div class="alert danger" style="margin-bottom:6px;">
+            <strong>u/${m.name}</strong>
+            <div class="alert-time">${m.actions} actions \xB7 ${m.recentActions?.slice(0, 3).join(", ") ?? ""}</div>
+          </div>`).join("")
+  );
+});
+document.getElementById("card-totalactions")?.addEventListener("click", () => {
+  if (!burnoutData) return;
+  showDetail(
+    "burnout-detail-box",
+    "burnout-detail-title",
+    "burnout-detail-body",
+    "burnout-detail-close",
+    "\u26A1 All Mod Actions",
+    burnoutData.mods?.map((m) => `
+      <div class="alert ${m.burnoutLevel === "High" ? "danger" : m.burnoutLevel === "Medium" ? "warning" : "good"}" style="margin-bottom:6px;">
+        <strong>u/${m.name}</strong> \u2014 ${m.actions} actions
+        <div class="alert-time">${m.recentActions?.slice(0, 3).join(", ") ?? ""}</div>
+      </div>`).join("") ?? ""
+  );
+});
 scanBtn.addEventListener("click", async () => {
   scanBtn.textContent = "\u{1F504} Scanning...";
   scanBtn.style.opacity = "0.7";
   try {
     const res = await fetch("/api/health-scan");
     const data = await res.json();
+    healthData = data;
     healthScore.textContent = String(data.healthScore ?? 0);
     flaggedPosts.textContent = String(data.flaggedCount ?? 0);
     postsToday.textContent = String(data.totalPosts ?? 0);
     newMembers.textContent = String(data.members ?? "N/A");
     updateHealthStatus(data.healthScore ?? 0);
+    alertsContainer.innerHTML = "";
+    const allPosts = [...data.flaggedDetails ?? [], ...data.recentPosts ?? []];
+    allPosts.forEach((p) => alertsContainer.appendChild(
+      createPostCard(p, true, p.reason ? "danger" : "good")
+    ));
     scanBtn.textContent = "\u2705 Scan Complete!";
-  } catch (e) {
+  } catch {
     scanBtn.textContent = "\u274C Scan Failed";
   }
   setTimeout(() => {
@@ -7431,21 +7785,26 @@ toxicityScanBtn.addEventListener("click", async () => {
   try {
     const res = await fetch("/api/toxicity-scan");
     const data = await res.json();
+    toxicData = data;
     highRiskCount.textContent = String(data.highRiskCount ?? 0);
     analyzedCount.textContent = String(data.totalAnalyzed ?? 0);
-    if (!data.riskyPosts || data.riskyPosts.length === 0) {
-      toxicPostsContainer.innerHTML = `<div class="alert good">\u2705 No risky posts found!</div>`;
+    toxicPostsContainer.innerHTML = "";
+    if (data.commentCount > 0) {
+      const badge = document.createElement("div");
+      badge.className = "alert warning";
+      badge.style.marginBottom = "8px";
+      badge.innerHTML = `\u{1F4AC} <strong>${data.commentCount} risky comments</strong> also found`;
+      toxicPostsContainer.appendChild(badge);
+    }
+    if (!data.riskyPosts?.length) {
+      toxicPostsContainer.innerHTML += `<div class="alert good">\u2705 No risky posts or comments found!</div>`;
     } else {
-      toxicPostsContainer.innerHTML = data.riskyPosts.map((post) => `
-        <div class="alert ${post.riskLevel === "High" ? "danger" : "warning"}">
-          <span class="risk-badge risk-${post.riskLevel.toLowerCase()}">${post.riskLevel} Risk</span>
-          ${post.title}
-          <div class="alert-time">Triggers: ${post.triggers?.join(", ") || "none"}</div>
-        </div>
-      `).join("");
+      data.riskyPosts.forEach((p) => toxicPostsContainer.appendChild(
+        createPostCard(p, true, p.riskLevel === "High" ? "danger" : "warning")
+      ));
     }
     toxicityScanBtn.textContent = "\u2705 Analysis Complete!";
-  } catch (e) {
+  } catch {
     toxicityScanBtn.textContent = "\u274C Scan Failed";
   }
   setTimeout(() => {
@@ -7459,25 +7818,35 @@ raidScanBtn.addEventListener("click", async () => {
   try {
     const res = await fetch("/api/raid-scan");
     const data = await res.json();
+    raidData = data;
     const risk = data.raidRisk ?? "Low";
     const score = data.raidScore ?? 0;
-    const comments = data.recentComments ?? 0;
-    const authors = data.uniqueAuthors ?? 0;
-    const newAccounts = data.newAccountActivity ?? 0;
     raidRiskScore.textContent = risk;
-    recentCommentsEl.textContent = String(comments);
-    uniqueAuthorsEl.textContent = String(authors);
-    newAccountActivityEl.textContent = String(newAccounts);
+    recentCommentsEl.textContent = String(data.recentComments ?? 0);
+    uniqueAuthorsEl.textContent = String(data.uniqueAuthors ?? 0);
+    newAccountActivityEl.textContent = String(data.newAccountActivity ?? 0);
     const riskColor = risk === "High" ? "danger" : risk === "Medium" ? "warning" : "good";
     const riskEmoji = risk === "High" ? "\u{1F6A8}" : risk === "Medium" ? "\u26A0\uFE0F" : "\u2705";
     raidStatusContainer.innerHTML = `
-      <div class="alert ${riskColor}">
+      <div class="alert ${riskColor}" style="margin-bottom:8px;">
         ${riskEmoji} Raid Risk: <strong>${risk}</strong> (Score: ${score}/100)
-        <div class="alert-time">${authors} unique authors \xB7 ${newAccounts} new accounts \xB7 ${comments} recent comments</div>
+        <div class="alert-time">${data.uniqueAuthors} unique authors \xB7 ${data.recentComments} recent posts \xB7 \u{1F476} ${data.newAccountActivity} new accounts</div>
       </div>
     `;
+    data.suspiciousUsers?.slice(0, 5).forEach((u) => {
+      const userDiv = document.createElement("div");
+      const ageColor = u.accountAgeDays < 7 ? "#f44336" : u.accountAgeDays < 30 ? "#ff9800" : "#4caf50";
+      userDiv.className = `alert ${u.isNewAccount ? "danger" : u.postCount > 1 ? "warning" : ""}`;
+      userDiv.style.marginBottom = "6px";
+      userDiv.innerHTML = `
+        <strong>u/${u.author}</strong> \u2014 ${u.postCount} posts
+        <span style="margin-left:8px;color:${ageColor};font-size:11px;">${u.accountAgeLabel}</span>
+      `;
+      raidStatusContainer.appendChild(userDiv);
+      u.posts?.forEach((p) => raidStatusContainer.appendChild(createPostCard(p, true, "")));
+    });
     raidScanBtn.textContent = "\u2705 Scan Complete!";
-  } catch (e) {
+  } catch {
     raidScanBtn.textContent = "\u274C Scan Failed";
   }
   setTimeout(() => {
@@ -7491,23 +7860,30 @@ burnoutScanBtn.addEventListener("click", async () => {
   try {
     const res = await fetch("/api/burnout-scan");
     const data = await res.json();
+    burnoutData = data;
     overloadedMods.textContent = String(data.overloadedMods ?? 0);
     totalActions.textContent = String(data.totalActions ?? 0);
-    if (!data.mods || data.mods.length === 0) {
-      modListContainer.innerHTML = `<div class="alert good">\u2705 No mod activity found \u2014 all quiet!</div>`;
+    modListContainer.innerHTML = "";
+    if (!data.mods?.length) {
+      modListContainer.innerHTML = `<div class="alert good">\u2705 No mod activity found!</div>`;
     } else {
-      modListContainer.innerHTML = data.mods.map((mod) => `
-        <div class="mod-card">
+      data.mods.forEach((mod) => {
+        const div = document.createElement("div");
+        div.className = "mod-card";
+        div.style.cursor = "pointer";
+        div.innerHTML = `
           <div>
             <div class="mod-name">u/${mod.name}</div>
-            <div class="mod-actions">${mod.actions} actions this week</div>
+            <div class="mod-actions">${mod.actions} actions \xB7 ${mod.recentActions?.slice(0, 2).join(", ") ?? ""} \xB7 Tap to view</div>
           </div>
           <span class="risk-badge risk-${mod.burnoutLevel.toLowerCase()}">${mod.burnoutLevel}</span>
-        </div>
-      `).join("");
+        `;
+        div.addEventListener("click", () => navigateTo(`https://www.reddit.com/user/${mod.name}`));
+        modListContainer.appendChild(div);
+      });
     }
     burnoutScanBtn.textContent = "\u2705 Scan Complete!";
-  } catch (e) {
+  } catch {
     burnoutScanBtn.textContent = "\u274C Scan Failed";
   }
   setTimeout(() => {
@@ -7519,11 +7895,17 @@ async function autoScan() {
   try {
     const res = await fetch("/api/health-scan");
     const data = await res.json();
+    healthData = data;
     healthScore.textContent = String(data.healthScore ?? 87);
     flaggedPosts.textContent = String(data.flaggedCount ?? 0);
     postsToday.textContent = String(data.totalPosts ?? 0);
     newMembers.textContent = String(data.members ?? 0);
     updateHealthStatus(data.healthScore ?? 87);
+    alertsContainer.innerHTML = "";
+    const allPosts = [...data.flaggedDetails ?? [], ...data.recentPosts ?? []];
+    allPosts.forEach((p) => alertsContainer.appendChild(
+      createPostCard(p, true, p.reason ? "danger" : "good")
+    ));
   } catch (e) {
     console.log("Auto scan failed", e);
   }
