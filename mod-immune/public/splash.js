@@ -7603,8 +7603,413 @@ function showDetail(boxId, titleId, bodyId, closeId, title, html) {
   box.classList.add("show");
   document.getElementById(closeId).onclick = () => box.classList.remove("show");
 }
+async function openKeywordsPanel() {
+  let modal = document.getElementById("keywords-modal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "keywords-modal";
+    modal.style.cssText = `
+      display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);
+      z-index:3000;align-items:center;justify-content:center;
+    `;
+    modal.innerHTML = `
+      <div style="background:#1a1a2e;border:1px solid rgba(255,69,0,0.3);border-radius:16px;
+                  padding:20px;width:90%;max-width:400px;max-height:80vh;overflow-y:auto;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+          <strong style="font-size:15px;">\u{1F511} Custom Keywords</strong>
+          <button id="kw-close" style="background:none;border:none;color:#aaa;font-size:18px;cursor:pointer;">\u2715</button>
+        </div>
+        <div style="font-size:12px;color:#aaa;margin-bottom:10px;">
+          One keyword per line. These are used for toxicity scanning and auto-mod.
+        </div>
+        <textarea id="kw-textarea" style="width:100%;height:180px;background:rgba(255,255,255,0.05);
+          border:1px solid rgba(255,255,255,0.15);border-radius:8px;color:#fff;
+          font-size:13px;padding:10px;resize:none;box-sizing:border-box;"
+          placeholder="hate&#10;kill&#10;spam&#10;scam"></textarea>
+        <div style="display:flex;gap:8px;margin-top:12px;">
+          <button id="kw-reset" style="flex:1;padding:10px;border-radius:8px;border:1px solid rgba(255,152,0,0.4);
+            background:rgba(255,152,0,0.1);color:#ff9800;font-size:12px;font-weight:700;cursor:pointer;">
+            \u21A9\uFE0F Reset to Defaults
+          </button>
+          <button id="kw-save" style="flex:1;padding:10px;border-radius:8px;border:1px solid rgba(76,175,80,0.4);
+            background:rgba(76,175,80,0.1);color:#4caf50;font-size:13px;font-weight:700;cursor:pointer;">
+            \u{1F4BE} Save Keywords
+          </button>
+        </div>
+        <div id="kw-status" style="font-size:12px;margin-top:8px;text-align:center;color:#aaa;"></div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    document.getElementById("kw-close").onclick = () => {
+      modal.style.display = "none";
+    };
+    document.getElementById("kw-save").onclick = async () => {
+      const textarea2 = document.getElementById("kw-textarea");
+      const keywords = textarea2.value.split("\n").map((k) => k.trim()).filter((k) => k.length > 0);
+      const statusEl = document.getElementById("kw-status");
+      statusEl.textContent = "Saving...";
+      try {
+        const res = await fetch("/api/save-keywords", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ keywords })
+        });
+        const data = await res.json();
+        if (data.success) {
+          statusEl.style.color = "#4caf50";
+          statusEl.textContent = `\u2705 Saved ${data.keywords.length} keywords!`;
+          showToast("\u2705 Keywords saved!");
+        } else {
+          statusEl.style.color = "#f44336";
+          statusEl.textContent = "\u274C Save failed";
+        }
+      } catch {
+        statusEl.style.color = "#f44336";
+        statusEl.textContent = "\u274C Error saving";
+      }
+    };
+    document.getElementById("kw-reset").onclick = async () => {
+      const DEFAULT = ["hate", "kill", "stupid", "idiot", "trash", "spam", "scam", "fake", "die", "attack", "ban", "raid"];
+      const textarea2 = document.getElementById("kw-textarea");
+      textarea2.value = DEFAULT.join("\n");
+      document.getElementById("kw-status").textContent = "Defaults loaded \u2014 click Save to apply";
+    };
+  }
+  modal.style.display = "flex";
+  const textarea = document.getElementById("kw-textarea");
+  textarea.value = "Loading...";
+  try {
+    const res = await fetch("/api/get-keywords");
+    const data = await res.json();
+    textarea.value = (data.keywords ?? []).join("\n");
+  } catch {
+    textarea.value = "";
+  }
+}
+async function openActionLog() {
+  let modal = document.getElementById("actionlog-modal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "actionlog-modal";
+    modal.style.cssText = `
+      display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);
+      z-index:3000;align-items:center;justify-content:center;
+    `;
+    modal.innerHTML = `
+      <div style="background:#1a1a2e;border:1px solid rgba(255,69,0,0.3);border-radius:16px;
+                  padding:20px;width:90%;max-width:420px;max-height:85vh;overflow-y:auto;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+          <strong style="font-size:15px;">\u{1F4CB} Mod Action History</strong>
+          <button id="al-close" style="background:none;border:none;color:#aaa;font-size:18px;cursor:pointer;">\u2715</button>
+        </div>
+        <div id="al-body" style="font-size:13px;"></div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    document.getElementById("al-close").onclick = () => {
+      modal.style.display = "none";
+    };
+  }
+  modal.style.display = "flex";
+  const body = document.getElementById("al-body");
+  body.innerHTML = `<div style="color:#aaa;text-align:center;padding:20px;">Loading...</div>`;
+  try {
+    const res = await fetch("/api/get-action-log");
+    const data = await res.json();
+    const log = data.log ?? [];
+    if (!log.length) {
+      body.innerHTML = `<div class="alert good" style="text-align:center;">\u2705 No actions yet \u2014 actions appear here after you Remove, Lock, Approve, or Ban.</div>`;
+      return;
+    }
+    const actionEmoji = {
+      remove: "\u{1F5D1}\uFE0F",
+      lock: "\u{1F512}",
+      approve: "\u2705",
+      ban: "\u{1F6AB}",
+      "automod-remove": "\u{1F916}\u{1F5D1}\uFE0F",
+      "automod-lock": "\u{1F916}\u{1F512}"
+    };
+    body.innerHTML = log.map((entry) => {
+      const emoji = actionEmoji[entry.action] ?? "\u26A1";
+      const timeAgo = formatTimeAgo(entry.timestamp);
+      const color = ["remove", "ban", "automod-remove"].includes(entry.action) ? "#f44336" : entry.action === "approve" ? "#4caf50" : "#ff9800";
+      return `
+        <div style="border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px;margin-bottom:8px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span style="color:${color};font-weight:700;">${emoji} ${entry.action.toUpperCase()}</span>
+            <span style="color:#666;font-size:11px;">${timeAgo}</span>
+          </div>
+          <div style="color:#ccc;font-size:12px;margin-top:4px;">
+            ${entry.targetType}: <code style="color:#ff9800;">${entry.targetId.slice(-12)}</code>
+          </div>
+          <div style="color:#888;font-size:11px;">by u/${entry.mod}${entry.note ? " \xB7 " + entry.note : ""}</div>
+        </div>
+      `;
+    }).join("");
+  } catch {
+    body.innerHTML = `<div style="color:#f44336;text-align:center;">\u274C Failed to load log</div>`;
+  }
+}
+function formatTimeAgo(timestamp) {
+  const diff = Date.now() - timestamp;
+  const mins = Math.floor(diff / 6e4);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+async function openAutomodPanel() {
+  let modal = document.getElementById("automod-modal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "automod-modal";
+    modal.style.cssText = `
+      display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);
+      z-index:3000;align-items:center;justify-content:center;
+    `;
+    modal.innerHTML = `
+      <div style="background:#1a1a2e;border:1px solid rgba(255,69,0,0.3);border-radius:16px;
+                  padding:20px;width:90%;max-width:400px;max-height:85vh;overflow-y:auto;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+          <strong style="font-size:15px;">\u{1F916} Auto-Mod Rules</strong>
+          <button id="am-close" style="background:none;border:none;color:#aaa;font-size:18px;cursor:pointer;">\u2715</button>
+        </div>
+
+        <div style="background:rgba(255,69,0,0.08);border:1px solid rgba(255,69,0,0.2);border-radius:10px;padding:12px;margin-bottom:14px;font-size:12px;color:#aaa;">
+          When enabled, Auto-Mod automatically acts on flagged content based on your keyword list and threshold \u2014 no manual review needed.
+        </div>
+
+        <label style="display:flex;align-items:center;gap:10px;margin-bottom:14px;cursor:pointer;">
+          <input type="checkbox" id="am-enabled" style="width:18px;height:18px;accent-color:#ff4500;">
+          <span style="font-size:14px;font-weight:600;">Enable Auto-Mod</span>
+        </label>
+
+        <div style="margin-bottom:12px;">
+          <div style="font-size:12px;color:#aaa;margin-bottom:6px;">Action when threshold is hit:</div>
+          <select id="am-action" style="width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);
+            border-radius:8px;color:#fff;padding:9px;font-size:13px;">
+            <option value="remove">\u{1F5D1}\uFE0F Auto-Remove</option>
+            <option value="lock">\u{1F512} Auto-Lock</option>
+            <option value="none">\u{1F441}\uFE0F Flag Only (no action)</option>
+          </select>
+        </div>
+
+        <div style="margin-bottom:12px;">
+          <div style="font-size:12px;color:#aaa;margin-bottom:6px;">Risk score threshold (0\u2013100):</div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <input type="range" id="am-threshold" min="25" max="100" step="25"
+              style="flex:1;accent-color:#ff4500;">
+            <span id="am-threshold-val" style="color:#ff4500;font-weight:700;min-width:30px;">75</span>
+          </div>
+          <div style="font-size:11px;color:#666;margin-top:4px;">25=Low, 50=Medium, 75=High, 100=Max</div>
+        </div>
+
+        <div style="margin-bottom:16px;">
+          <div style="font-size:12px;color:#aaa;margin-bottom:6px;">Apply to:</div>
+          <select id="am-target" style="width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);
+            border-radius:8px;color:#fff;padding:9px;font-size:13px;">
+            <option value="both">\u{1F4DD} Posts + \u{1F4AC} Comments</option>
+            <option value="posts">\u{1F4DD} Posts only</option>
+            <option value="comments">\u{1F4AC} Comments only</option>
+          </select>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-bottom:10px;">
+          <button id="am-save" style="flex:1;padding:10px;border-radius:8px;border:1px solid rgba(76,175,80,0.4);
+            background:rgba(76,175,80,0.1);color:#4caf50;font-size:13px;font-weight:700;cursor:pointer;">
+            \u{1F4BE} Save Rules
+          </button>
+          <button id="am-runnow" style="flex:1;padding:10px;border-radius:8px;border:1px solid rgba(255,69,0,0.4);
+            background:rgba(255,69,0,0.1);color:#ff4500;font-size:13px;font-weight:700;cursor:pointer;">
+            \u25B6\uFE0F Run Now
+          </button>
+        </div>
+        <div id="am-status" style="font-size:12px;text-align:center;color:#aaa;min-height:18px;"></div>
+        <div id="am-results" style="margin-top:10px;font-size:12px;"></div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    document.getElementById("am-close").onclick = () => {
+      modal.style.display = "none";
+    };
+    const slider = document.getElementById("am-threshold");
+    const sliderVal = document.getElementById("am-threshold-val");
+    slider.addEventListener("input", () => {
+      sliderVal.textContent = slider.value;
+    });
+    document.getElementById("am-save").onclick = async () => {
+      const rules = {
+        enabled: document.getElementById("am-enabled").checked,
+        action: document.getElementById("am-action").value,
+        threshold: parseInt(document.getElementById("am-threshold").value),
+        targetType: document.getElementById("am-target").value
+      };
+      const statusEl = document.getElementById("am-status");
+      statusEl.textContent = "Saving...";
+      try {
+        const res = await fetch("/api/save-automod-rules", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rules })
+        });
+        const data = await res.json();
+        if (data.success) {
+          statusEl.style.color = "#4caf50";
+          statusEl.textContent = "\u2705 Rules saved!";
+          showToast("\u{1F916} Auto-mod rules saved!");
+        } else {
+          statusEl.style.color = "#f44336";
+          statusEl.textContent = "\u274C Save failed";
+        }
+      } catch {
+        statusEl.style.color = "#f44336";
+        statusEl.textContent = "\u274C Error";
+      }
+    };
+    document.getElementById("am-runnow").onclick = async () => {
+      const btn = document.getElementById("am-runnow");
+      const statusEl = document.getElementById("am-status");
+      const resultsEl = document.getElementById("am-results");
+      btn.textContent = "\u23F3 Running...";
+      btn.disabled = true;
+      statusEl.textContent = "Running auto-mod scan...";
+      try {
+        const res = await fetch("/api/run-automod");
+        const data = await res.json();
+        statusEl.style.color = data.success ? "#4caf50" : "#f44336";
+        statusEl.textContent = data.message ?? (data.success ? "Done!" : "Failed");
+        if (data.actions?.length) {
+          resultsEl.innerHTML = data.actions.map(
+            (a) => `<div style="color:#ff9800;margin-bottom:4px;">\u2022 ${a}</div>`
+          ).join("");
+        } else {
+          resultsEl.innerHTML = `<div style="color:#aaa;">No actions taken.</div>`;
+        }
+      } catch {
+        statusEl.style.color = "#f44336";
+        statusEl.textContent = "\u274C Run failed";
+      }
+      btn.textContent = "\u25B6\uFE0F Run Now";
+      btn.disabled = false;
+    };
+  }
+  modal.style.display = "flex";
+  try {
+    const res = await fetch("/api/get-automod-rules");
+    const data = await res.json();
+    const r = data.rules ?? {};
+    document.getElementById("am-enabled").checked = !!r.enabled;
+    document.getElementById("am-action").value = r.action ?? "remove";
+    const slider = document.getElementById("am-threshold");
+    slider.value = String(r.threshold ?? 75);
+    document.getElementById("am-threshold-val").textContent = String(r.threshold ?? 75);
+    document.getElementById("am-target").value = r.targetType ?? "both";
+  } catch {
+  }
+}
+async function openHealthHistory() {
+  let modal = document.getElementById("history-modal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "history-modal";
+    modal.style.cssText = `
+      display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);
+      z-index:3000;align-items:center;justify-content:center;
+    `;
+    modal.innerHTML = `
+      <div style="background:#1a1a2e;border:1px solid rgba(255,69,0,0.3);border-radius:16px;
+                  padding:20px;width:90%;max-width:420px;max-height:85vh;overflow-y:auto;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+          <strong style="font-size:15px;">\u{1F4C8} Health History</strong>
+          <button id="hh-close" style="background:none;border:none;color:#aaa;font-size:18px;cursor:pointer;">\u2715</button>
+        </div>
+        <div style="font-size:12px;color:#aaa;margin-bottom:14px;">Recorded each time you run a Health Scan. Up to 14 entries shown.</div>
+        <div id="hh-body"></div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    document.getElementById("hh-close").onclick = () => {
+      modal.style.display = "none";
+    };
+  }
+  modal.style.display = "flex";
+  const body = document.getElementById("hh-body");
+  body.innerHTML = `<div style="color:#aaa;text-align:center;padding:20px;">Loading...</div>`;
+  try {
+    const res = await fetch("/api/get-health-history");
+    const data = await res.json();
+    const history = data.history ?? [];
+    if (!history.length) {
+      body.innerHTML = `<div class="alert good" style="text-align:center;">\u2705 No history yet \u2014 run a Health Scan to start recording.</div>`;
+      return;
+    }
+    const maxScore = 100;
+    body.innerHTML = history.map((entry) => {
+      const score = entry.score ?? 0;
+      const barColor = score >= 80 ? "#4caf50" : score >= 50 ? "#ff9800" : "#f44336";
+      const barWidth = Math.round(score / maxScore * 100);
+      return `
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+          <div style="min-width:50px;font-size:11px;color:#aaa;">${entry.date}</div>
+          <div style="flex:1;background:rgba(255,255,255,0.05);border-radius:4px;height:18px;overflow:hidden;">
+            <div style="width:${barWidth}%;height:100%;background:${barColor};border-radius:4px;transition:width 0.4s;"></div>
+          </div>
+          <div style="min-width:32px;font-size:12px;font-weight:700;color:${barColor};">${score}</div>
+          <div style="font-size:11px;color:#666;">${entry.flaggedCount ?? 0}\u26A0\uFE0F</div>
+        </div>
+      `;
+    }).join("");
+  } catch {
+    body.innerHTML = `<div style="color:#f44336;text-align:center;">\u274C Failed to load history</div>`;
+  }
+}
+function injectFeatureButtons() {
+  const toxPanel = document.getElementById("panel-toxicity");
+  if (toxPanel) {
+    const bar = document.createElement("div");
+    bar.style.cssText = "display:flex;gap:8px;margin-bottom:12px;";
+    bar.innerHTML = `
+      <button id="btn-keywords" style="flex:1;padding:9px;border-radius:8px;border:1px solid rgba(255,152,0,0.4);
+        background:rgba(255,152,0,0.1);color:#ff9800;font-size:12px;font-weight:700;cursor:pointer;">
+        \u{1F511} Custom Keywords
+      </button>
+      <button id="btn-automod" style="flex:1;padding:9px;border-radius:8px;border:1px solid rgba(255,69,0,0.4);
+        background:rgba(255,69,0,0.1);color:#ff4500;font-size:12px;font-weight:700;cursor:pointer;">
+        \u{1F916} Auto-Mod Rules
+      </button>
+    `;
+    toxPanel.insertBefore(bar, toxPanel.firstChild);
+    document.getElementById("btn-keywords").addEventListener("click", openKeywordsPanel);
+    document.getElementById("btn-automod").addEventListener("click", openAutomodPanel);
+  }
+  const overviewPanel = document.getElementById("panel-overview");
+  if (overviewPanel) {
+    const bar = document.createElement("div");
+    bar.style.cssText = "display:flex;gap:8px;margin-bottom:12px;margin-top:4px;";
+    bar.innerHTML = `
+      <button id="btn-actionlog" style="flex:1;padding:9px;border-radius:8px;border:1px solid rgba(100,100,255,0.4);
+        background:rgba(100,100,255,0.1);color:#9090ff;font-size:12px;font-weight:700;cursor:pointer;">
+        \u{1F4CB} Action Log
+      </button>
+      <button id="btn-history" style="flex:1;padding:9px;border-radius:8px;border:1px solid rgba(76,175,80,0.4);
+        background:rgba(76,175,80,0.1);color:#4caf50;font-size:12px;font-weight:700;cursor:pointer;">
+        \u{1F4C8} Health History
+      </button>
+    `;
+    const firstCard = overviewPanel.querySelector(".stat-grid") ?? overviewPanel.firstChild;
+    if (firstCard && firstCard.nextSibling) {
+      overviewPanel.insertBefore(bar, firstCard.nextSibling);
+    } else {
+      overviewPanel.appendChild(bar);
+    }
+    document.getElementById("btn-actionlog").addEventListener("click", openActionLog);
+    document.getElementById("btn-history").addEventListener("click", openHealthHistory);
+  }
+}
 function init() {
   subtitle.textContent = `r/${context.subredditName ?? "your community"}`;
+  injectFeatureButtons();
 }
 function switchTab(tab) {
   document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));

@@ -28,6 +28,8 @@ let toxicData: any = null;
 let raidData: any = null;
 let burnoutData: any = null;
 
+// ── TOAST ──────────────────────────────────────────────────────────────────────
+
 function showToast(msg: string, isError = false) {
   let toast = document.getElementById("toast");
   if (!toast) {
@@ -48,7 +50,8 @@ function showToast(msg: string, isError = false) {
   setTimeout(() => { toast!.style.opacity = "0"; }, 2500);
 }
 
-// FIXED: now sends itemType so server knows comment vs post
+// ── MOD ACTIONS ────────────────────────────────────────────────────────────────
+
 async function removePost(postId: string, itemType: string, btn: HTMLButtonElement, container: HTMLElement) {
   btn.textContent = "⏳";
   btn.disabled = true;
@@ -101,7 +104,6 @@ async function lockPost(postId: string, btn: HTMLButtonElement, container: HTMLE
   }
 }
 
-// FIXED: now sends itemType so server knows comment vs post
 async function approvePost(postId: string, itemType: string, btn: HTMLButtonElement, container: HTMLElement) {
   btn.textContent = "⏳";
   btn.disabled = true;
@@ -155,6 +157,8 @@ async function banUser(username: string, btn: HTMLButtonElement, container: HTML
   }
 }
 
+// ── POST CARD ──────────────────────────────────────────────────────────────────
+
 function createPostCard(post: any, showActions = true, colorClass = "good"): HTMLElement {
   const div = document.createElement("div");
   div.className = `alert ${colorClass}`;
@@ -183,7 +187,6 @@ function createPostCard(post: any, showActions = true, colorClass = "good"): HTM
     const removeBtn = document.createElement("button");
     removeBtn.textContent = "🗑️ Remove";
     removeBtn.style.cssText = "flex:1;min-width:70px;padding:6px;border-radius:8px;border:1px solid rgba(244,67,54,0.4);background:rgba(244,67,54,0.1);color:#f44336;font-size:11px;font-weight:700;cursor:pointer;";
-    // FIXED: passes post.type ("comment" or "post") as itemType
     removeBtn.addEventListener("click", (e) => { e.stopPropagation(); removePost(post.id, post.type ?? "post", removeBtn, div); });
 
     const lockBtn = document.createElement("button");
@@ -194,7 +197,6 @@ function createPostCard(post: any, showActions = true, colorClass = "good"): HTM
     const approveBtn = document.createElement("button");
     approveBtn.textContent = "✅ Approve";
     approveBtn.style.cssText = "flex:1;min-width:70px;padding:6px;border-radius:8px;border:1px solid rgba(76,175,80,0.4);background:rgba(76,175,80,0.1);color:#4caf50;font-size:11px;font-weight:700;cursor:pointer;";
-    // FIXED: passes post.type as itemType
     approveBtn.addEventListener("click", (e) => { e.stopPropagation(); approvePost(post.id, post.type ?? "post", approveBtn, div); });
 
     const banBtn = document.createElement("button");
@@ -212,6 +214,8 @@ function createPostCard(post: any, showActions = true, colorClass = "good"): HTM
   return div;
 }
 
+// ── DETAIL BOXES ───────────────────────────────────────────────────────────────
+
 function showDetail(boxId: string, titleId: string, bodyId: string, closeId: string, title: string, html: string) {
   const box = document.getElementById(boxId)!;
   document.getElementById(titleId)!.textContent = title;
@@ -220,8 +224,444 @@ function showDetail(boxId: string, titleId: string, bodyId: string, closeId: str
   document.getElementById(closeId)!.onclick = () => box.classList.remove("show");
 }
 
+// ── FEATURE 3: CUSTOM KEYWORDS UI ─────────────────────────────────────────────
+
+async function openKeywordsPanel() {
+  // Build modal if it doesn't exist yet
+  let modal = document.getElementById("keywords-modal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "keywords-modal";
+    modal.style.cssText = `
+      display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);
+      z-index:3000;align-items:center;justify-content:center;
+    `;
+    modal.innerHTML = `
+      <div style="background:#1a1a2e;border:1px solid rgba(255,69,0,0.3);border-radius:16px;
+                  padding:20px;width:90%;max-width:400px;max-height:80vh;overflow-y:auto;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+          <strong style="font-size:15px;">🔑 Custom Keywords</strong>
+          <button id="kw-close" style="background:none;border:none;color:#aaa;font-size:18px;cursor:pointer;">✕</button>
+        </div>
+        <div style="font-size:12px;color:#aaa;margin-bottom:10px;">
+          One keyword per line. These are used for toxicity scanning and auto-mod.
+        </div>
+        <textarea id="kw-textarea" style="width:100%;height:180px;background:rgba(255,255,255,0.05);
+          border:1px solid rgba(255,255,255,0.15);border-radius:8px;color:#fff;
+          font-size:13px;padding:10px;resize:none;box-sizing:border-box;"
+          placeholder="hate&#10;kill&#10;spam&#10;scam"></textarea>
+        <div style="display:flex;gap:8px;margin-top:12px;">
+          <button id="kw-reset" style="flex:1;padding:10px;border-radius:8px;border:1px solid rgba(255,152,0,0.4);
+            background:rgba(255,152,0,0.1);color:#ff9800;font-size:12px;font-weight:700;cursor:pointer;">
+            ↩️ Reset to Defaults
+          </button>
+          <button id="kw-save" style="flex:1;padding:10px;border-radius:8px;border:1px solid rgba(76,175,80,0.4);
+            background:rgba(76,175,80,0.1);color:#4caf50;font-size:13px;font-weight:700;cursor:pointer;">
+            💾 Save Keywords
+          </button>
+        </div>
+        <div id="kw-status" style="font-size:12px;margin-top:8px;text-align:center;color:#aaa;"></div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    document.getElementById("kw-close")!.onclick = () => { modal!.style.display = "none"; };
+
+    document.getElementById("kw-save")!.onclick = async () => {
+      const textarea = document.getElementById("kw-textarea") as HTMLTextAreaElement;
+      const keywords = textarea.value.split("\n").map(k => k.trim()).filter(k => k.length > 0);
+      const statusEl = document.getElementById("kw-status")!;
+      statusEl.textContent = "Saving...";
+      try {
+        const res = await fetch("/api/save-keywords", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ keywords }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          statusEl.style.color = "#4caf50";
+          statusEl.textContent = `✅ Saved ${data.keywords.length} keywords!`;
+          showToast("✅ Keywords saved!");
+        } else {
+          statusEl.style.color = "#f44336";
+          statusEl.textContent = "❌ Save failed";
+        }
+      } catch {
+        statusEl.style.color = "#f44336";
+        statusEl.textContent = "❌ Error saving";
+      }
+    };
+
+    document.getElementById("kw-reset")!.onclick = async () => {
+      const DEFAULT = ["hate","kill","stupid","idiot","trash","spam","scam","fake","die","attack","ban","raid"];
+      const textarea = document.getElementById("kw-textarea") as HTMLTextAreaElement;
+      textarea.value = DEFAULT.join("\n");
+      document.getElementById("kw-status")!.textContent = "Defaults loaded — click Save to apply";
+    };
+  }
+
+  // Load current keywords
+  modal.style.display = "flex";
+  const textarea = document.getElementById("kw-textarea") as HTMLTextAreaElement;
+  textarea.value = "Loading...";
+  try {
+    const res = await fetch("/api/get-keywords");
+    const data = await res.json();
+    textarea.value = (data.keywords ?? []).join("\n");
+  } catch {
+    textarea.value = "";
+  }
+}
+
+// ── FEATURE 2: ACTION LOG UI ──────────────────────────────────────────────────
+
+async function openActionLog() {
+  let modal = document.getElementById("actionlog-modal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "actionlog-modal";
+    modal.style.cssText = `
+      display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);
+      z-index:3000;align-items:center;justify-content:center;
+    `;
+    modal.innerHTML = `
+      <div style="background:#1a1a2e;border:1px solid rgba(255,69,0,0.3);border-radius:16px;
+                  padding:20px;width:90%;max-width:420px;max-height:85vh;overflow-y:auto;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+          <strong style="font-size:15px;">📋 Mod Action History</strong>
+          <button id="al-close" style="background:none;border:none;color:#aaa;font-size:18px;cursor:pointer;">✕</button>
+        </div>
+        <div id="al-body" style="font-size:13px;"></div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    document.getElementById("al-close")!.onclick = () => { modal!.style.display = "none"; };
+  }
+
+  modal.style.display = "flex";
+  const body = document.getElementById("al-body")!;
+  body.innerHTML = `<div style="color:#aaa;text-align:center;padding:20px;">Loading...</div>`;
+
+  try {
+    const res = await fetch("/api/get-action-log");
+    const data = await res.json();
+    const log = data.log ?? [];
+
+    if (!log.length) {
+      body.innerHTML = `<div class="alert good" style="text-align:center;">✅ No actions yet — actions appear here after you Remove, Lock, Approve, or Ban.</div>`;
+      return;
+    }
+
+    const actionEmoji: Record<string, string> = {
+      remove: "🗑️", lock: "🔒", approve: "✅", ban: "🚫",
+      "automod-remove": "🤖🗑️", "automod-lock": "🤖🔒",
+    };
+
+    body.innerHTML = log.map((entry: any) => {
+      const emoji = actionEmoji[entry.action] ?? "⚡";
+      const timeAgo = formatTimeAgo(entry.timestamp);
+      const color = ["remove","ban","automod-remove"].includes(entry.action) ? "#f44336"
+        : entry.action === "approve" ? "#4caf50" : "#ff9800";
+      return `
+        <div style="border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px;margin-bottom:8px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span style="color:${color};font-weight:700;">${emoji} ${entry.action.toUpperCase()}</span>
+            <span style="color:#666;font-size:11px;">${timeAgo}</span>
+          </div>
+          <div style="color:#ccc;font-size:12px;margin-top:4px;">
+            ${entry.targetType}: <code style="color:#ff9800;">${entry.targetId.slice(-12)}</code>
+          </div>
+          <div style="color:#888;font-size:11px;">by u/${entry.mod}${entry.note ? " · " + entry.note : ""}</div>
+        </div>
+      `;
+    }).join("");
+  } catch {
+    body.innerHTML = `<div style="color:#f44336;text-align:center;">❌ Failed to load log</div>`;
+  }
+}
+
+function formatTimeAgo(timestamp: number): string {
+  const diff = Date.now() - timestamp;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+// ── FEATURE 1: AUTO-MOD RULES UI ──────────────────────────────────────────────
+
+async function openAutomodPanel() {
+  let modal = document.getElementById("automod-modal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "automod-modal";
+    modal.style.cssText = `
+      display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);
+      z-index:3000;align-items:center;justify-content:center;
+    `;
+    modal.innerHTML = `
+      <div style="background:#1a1a2e;border:1px solid rgba(255,69,0,0.3);border-radius:16px;
+                  padding:20px;width:90%;max-width:400px;max-height:85vh;overflow-y:auto;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+          <strong style="font-size:15px;">🤖 Auto-Mod Rules</strong>
+          <button id="am-close" style="background:none;border:none;color:#aaa;font-size:18px;cursor:pointer;">✕</button>
+        </div>
+
+        <div style="background:rgba(255,69,0,0.08);border:1px solid rgba(255,69,0,0.2);border-radius:10px;padding:12px;margin-bottom:14px;font-size:12px;color:#aaa;">
+          When enabled, Auto-Mod automatically acts on flagged content based on your keyword list and threshold — no manual review needed.
+        </div>
+
+        <label style="display:flex;align-items:center;gap:10px;margin-bottom:14px;cursor:pointer;">
+          <input type="checkbox" id="am-enabled" style="width:18px;height:18px;accent-color:#ff4500;">
+          <span style="font-size:14px;font-weight:600;">Enable Auto-Mod</span>
+        </label>
+
+        <div style="margin-bottom:12px;">
+          <div style="font-size:12px;color:#aaa;margin-bottom:6px;">Action when threshold is hit:</div>
+          <select id="am-action" style="width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);
+            border-radius:8px;color:#fff;padding:9px;font-size:13px;">
+            <option value="remove">🗑️ Auto-Remove</option>
+            <option value="lock">🔒 Auto-Lock</option>
+            <option value="none">👁️ Flag Only (no action)</option>
+          </select>
+        </div>
+
+        <div style="margin-bottom:12px;">
+          <div style="font-size:12px;color:#aaa;margin-bottom:6px;">Risk score threshold (0–100):</div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <input type="range" id="am-threshold" min="25" max="100" step="25"
+              style="flex:1;accent-color:#ff4500;">
+            <span id="am-threshold-val" style="color:#ff4500;font-weight:700;min-width:30px;">75</span>
+          </div>
+          <div style="font-size:11px;color:#666;margin-top:4px;">25=Low, 50=Medium, 75=High, 100=Max</div>
+        </div>
+
+        <div style="margin-bottom:16px;">
+          <div style="font-size:12px;color:#aaa;margin-bottom:6px;">Apply to:</div>
+          <select id="am-target" style="width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);
+            border-radius:8px;color:#fff;padding:9px;font-size:13px;">
+            <option value="both">📝 Posts + 💬 Comments</option>
+            <option value="posts">📝 Posts only</option>
+            <option value="comments">💬 Comments only</option>
+          </select>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-bottom:10px;">
+          <button id="am-save" style="flex:1;padding:10px;border-radius:8px;border:1px solid rgba(76,175,80,0.4);
+            background:rgba(76,175,80,0.1);color:#4caf50;font-size:13px;font-weight:700;cursor:pointer;">
+            💾 Save Rules
+          </button>
+          <button id="am-runnow" style="flex:1;padding:10px;border-radius:8px;border:1px solid rgba(255,69,0,0.4);
+            background:rgba(255,69,0,0.1);color:#ff4500;font-size:13px;font-weight:700;cursor:pointer;">
+            ▶️ Run Now
+          </button>
+        </div>
+        <div id="am-status" style="font-size:12px;text-align:center;color:#aaa;min-height:18px;"></div>
+        <div id="am-results" style="margin-top:10px;font-size:12px;"></div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    document.getElementById("am-close")!.onclick = () => { modal!.style.display = "none"; };
+
+    const slider = document.getElementById("am-threshold") as HTMLInputElement;
+    const sliderVal = document.getElementById("am-threshold-val")!;
+    slider.addEventListener("input", () => { sliderVal.textContent = slider.value; });
+
+    document.getElementById("am-save")!.onclick = async () => {
+      const rules = {
+        enabled: (document.getElementById("am-enabled") as HTMLInputElement).checked,
+        action: (document.getElementById("am-action") as HTMLSelectElement).value,
+        threshold: parseInt((document.getElementById("am-threshold") as HTMLInputElement).value),
+        targetType: (document.getElementById("am-target") as HTMLSelectElement).value,
+      };
+      const statusEl = document.getElementById("am-status")!;
+      statusEl.textContent = "Saving...";
+      try {
+        const res = await fetch("/api/save-automod-rules", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rules }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          statusEl.style.color = "#4caf50";
+          statusEl.textContent = "✅ Rules saved!";
+          showToast("🤖 Auto-mod rules saved!");
+        } else {
+          statusEl.style.color = "#f44336";
+          statusEl.textContent = "❌ Save failed";
+        }
+      } catch {
+        statusEl.style.color = "#f44336";
+        statusEl.textContent = "❌ Error";
+      }
+    };
+
+    document.getElementById("am-runnow")!.onclick = async () => {
+      const btn = document.getElementById("am-runnow") as HTMLButtonElement;
+      const statusEl = document.getElementById("am-status")!;
+      const resultsEl = document.getElementById("am-results")!;
+      btn.textContent = "⏳ Running...";
+      btn.disabled = true;
+      statusEl.textContent = "Running auto-mod scan...";
+      try {
+        const res = await fetch("/api/run-automod");
+        const data = await res.json();
+        statusEl.style.color = data.success ? "#4caf50" : "#f44336";
+        statusEl.textContent = data.message ?? (data.success ? "Done!" : "Failed");
+        if (data.actions?.length) {
+          resultsEl.innerHTML = data.actions.map((a: string) =>
+            `<div style="color:#ff9800;margin-bottom:4px;">• ${a}</div>`
+          ).join("");
+        } else {
+          resultsEl.innerHTML = `<div style="color:#aaa;">No actions taken.</div>`;
+        }
+      } catch {
+        statusEl.style.color = "#f44336";
+        statusEl.textContent = "❌ Run failed";
+      }
+      btn.textContent = "▶️ Run Now";
+      btn.disabled = false;
+    };
+  }
+
+  // Load current rules
+  modal.style.display = "flex";
+  try {
+    const res = await fetch("/api/get-automod-rules");
+    const data = await res.json();
+    const r = data.rules ?? {};
+    (document.getElementById("am-enabled") as HTMLInputElement).checked = !!r.enabled;
+    (document.getElementById("am-action") as HTMLSelectElement).value = r.action ?? "remove";
+    const slider = document.getElementById("am-threshold") as HTMLInputElement;
+    slider.value = String(r.threshold ?? 75);
+    document.getElementById("am-threshold-val")!.textContent = String(r.threshold ?? 75);
+    (document.getElementById("am-target") as HTMLSelectElement).value = r.targetType ?? "both";
+  } catch {
+    // ignore, defaults will show
+  }
+}
+
+// ── FEATURE 4: HEALTH HISTORY UI ──────────────────────────────────────────────
+
+async function openHealthHistory() {
+  let modal = document.getElementById("history-modal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "history-modal";
+    modal.style.cssText = `
+      display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);
+      z-index:3000;align-items:center;justify-content:center;
+    `;
+    modal.innerHTML = `
+      <div style="background:#1a1a2e;border:1px solid rgba(255,69,0,0.3);border-radius:16px;
+                  padding:20px;width:90%;max-width:420px;max-height:85vh;overflow-y:auto;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+          <strong style="font-size:15px;">📈 Health History</strong>
+          <button id="hh-close" style="background:none;border:none;color:#aaa;font-size:18px;cursor:pointer;">✕</button>
+        </div>
+        <div style="font-size:12px;color:#aaa;margin-bottom:14px;">Recorded each time you run a Health Scan. Up to 14 entries shown.</div>
+        <div id="hh-body"></div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    document.getElementById("hh-close")!.onclick = () => { modal!.style.display = "none"; };
+  }
+
+  modal.style.display = "flex";
+  const body = document.getElementById("hh-body")!;
+  body.innerHTML = `<div style="color:#aaa;text-align:center;padding:20px;">Loading...</div>`;
+
+  try {
+    const res = await fetch("/api/get-health-history");
+    const data = await res.json();
+    const history = data.history ?? [];
+
+    if (!history.length) {
+      body.innerHTML = `<div class="alert good" style="text-align:center;">✅ No history yet — run a Health Scan to start recording.</div>`;
+      return;
+    }
+
+    // Mini bar chart using CSS
+    const maxScore = 100;
+    body.innerHTML = history.map((entry: any) => {
+      const score = entry.score ?? 0;
+      const barColor = score >= 80 ? "#4caf50" : score >= 50 ? "#ff9800" : "#f44336";
+      const barWidth = Math.round((score / maxScore) * 100);
+      return `
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+          <div style="min-width:50px;font-size:11px;color:#aaa;">${entry.date}</div>
+          <div style="flex:1;background:rgba(255,255,255,0.05);border-radius:4px;height:18px;overflow:hidden;">
+            <div style="width:${barWidth}%;height:100%;background:${barColor};border-radius:4px;transition:width 0.4s;"></div>
+          </div>
+          <div style="min-width:32px;font-size:12px;font-weight:700;color:${barColor};">${score}</div>
+          <div style="font-size:11px;color:#666;">${entry.flaggedCount ?? 0}⚠️</div>
+        </div>
+      `;
+    }).join("");
+  } catch {
+    body.innerHTML = `<div style="color:#f44336;text-align:center;">❌ Failed to load history</div>`;
+  }
+}
+
+// ── FEATURE BUTTONS (injected into existing tabs) ──────────────────────────────
+
+function injectFeatureButtons() {
+  // Inject "🔑 Keywords" + "🤖 Auto-Mod" into toxicity tab
+  const toxPanel = document.getElementById("panel-toxicity");
+  if (toxPanel) {
+    const bar = document.createElement("div");
+    bar.style.cssText = "display:flex;gap:8px;margin-bottom:12px;";
+    bar.innerHTML = `
+      <button id="btn-keywords" style="flex:1;padding:9px;border-radius:8px;border:1px solid rgba(255,152,0,0.4);
+        background:rgba(255,152,0,0.1);color:#ff9800;font-size:12px;font-weight:700;cursor:pointer;">
+        🔑 Custom Keywords
+      </button>
+      <button id="btn-automod" style="flex:1;padding:9px;border-radius:8px;border:1px solid rgba(255,69,0,0.4);
+        background:rgba(255,69,0,0.1);color:#ff4500;font-size:12px;font-weight:700;cursor:pointer;">
+        🤖 Auto-Mod Rules
+      </button>
+    `;
+    toxPanel.insertBefore(bar, toxPanel.firstChild);
+    document.getElementById("btn-keywords")!.addEventListener("click", openKeywordsPanel);
+    document.getElementById("btn-automod")!.addEventListener("click", openAutomodPanel);
+  }
+
+  // Inject "📋 Action Log" + "📈 History" into overview tab
+  const overviewPanel = document.getElementById("panel-overview");
+  if (overviewPanel) {
+    const bar = document.createElement("div");
+    bar.style.cssText = "display:flex;gap:8px;margin-bottom:12px;margin-top:4px;";
+    bar.innerHTML = `
+      <button id="btn-actionlog" style="flex:1;padding:9px;border-radius:8px;border:1px solid rgba(100,100,255,0.4);
+        background:rgba(100,100,255,0.1);color:#9090ff;font-size:12px;font-weight:700;cursor:pointer;">
+        📋 Action Log
+      </button>
+      <button id="btn-history" style="flex:1;padding:9px;border-radius:8px;border:1px solid rgba(76,175,80,0.4);
+        background:rgba(76,175,80,0.1);color:#4caf50;font-size:12px;font-weight:700;cursor:pointer;">
+        📈 Health History
+      </button>
+    `;
+    // Insert after the first element (health score card area)
+    const firstCard = overviewPanel.querySelector(".stat-grid") ?? overviewPanel.firstChild;
+    if (firstCard && firstCard.nextSibling) {
+      overviewPanel.insertBefore(bar, firstCard.nextSibling);
+    } else {
+      overviewPanel.appendChild(bar);
+    }
+    document.getElementById("btn-actionlog")!.addEventListener("click", openActionLog);
+    document.getElementById("btn-history")!.addEventListener("click", openHealthHistory);
+  }
+}
+
+// ── INIT & TAB SWITCHING ───────────────────────────────────────────────────────
+
 function init() {
   subtitle.textContent = `r/${context.subredditName ?? "your community"}`;
+  injectFeatureButtons();
 }
 
 function switchTab(tab: string) {
@@ -244,10 +684,14 @@ function updateHealthStatus(score: number) {
   }
 }
 
+// ── TAB EVENTS ─────────────────────────────────────────────────────────────────
+
 document.getElementById("tab-overview")?.addEventListener("click", () => switchTab("overview"));
 document.getElementById("tab-toxicity")?.addEventListener("click", () => switchTab("toxicity"));
 document.getElementById("tab-raid")?.addEventListener("click", () => switchTab("raid"));
 document.getElementById("tab-burnout")?.addEventListener("click", () => switchTab("burnout"));
+
+// ── CARD CLICK EVENTS ──────────────────────────────────────────────────────────
 
 document.getElementById("card-posts")?.addEventListener("click", () => {
   if (!healthData?.recentPosts?.length) return;
@@ -363,6 +807,8 @@ document.getElementById("card-totalactions")?.addEventListener("click", () => {
         <div class="alert-time">${m.recentActions?.slice(0, 3).join(", ") ?? ""}</div>
       </div>`).join("") ?? "");
 });
+
+// ── SCAN BUTTONS ───────────────────────────────────────────────────────────────
 
 scanBtn.addEventListener("click", async () => {
   scanBtn.textContent = "🔄 Scanning...";
@@ -493,6 +939,8 @@ burnoutScanBtn.addEventListener("click", async () => {
   }
   setTimeout(() => { burnoutScanBtn.textContent = "😮‍💨 Run Burnout Scan"; burnoutScanBtn.style.opacity = "1"; }, 2000);
 });
+
+// ── AUTO SCAN ON LOAD ──────────────────────────────────────────────────────────
 
 async function autoScan() {
   try {
